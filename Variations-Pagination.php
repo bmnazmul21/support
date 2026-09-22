@@ -1,12 +1,6 @@
 <?php
-/**
- * 1. Removes default archive query locks.
- * 2. On Main Shop: Queries simple products + child variations and hides parent variable products.
- * 3. On Category Pages: Filters strictly by category & child variations.
- * 4. Hides theme duplicate pagination in Table View.
- */
 
-// 1. Remove default archive filters & theme pagination
+//Remove default archive filters & theme pagination
 add_action( 'wp', function() {
     remove_filter( 'wpto_table_query_args', 'wpt_args_manipulation_frontend', 10 );
     remove_filter( 'wpto_table_query_args', 'wpt_shop_archive_sorting_args', 10 );
@@ -49,7 +43,7 @@ function wpt_get_active_archive_term() {
     return false;
 }
 
-// 2. Query simple products and child variations for Table 40709
+//Query simple products and child variations for Table 40709
 add_filter( 'wpto_table_query_args', function( $args, $table_id ) {
     global $wpdb;
 
@@ -59,13 +53,13 @@ add_filter( 'wpto_table_query_args', function( $args, $table_id ) {
 
     $term = wpt_get_active_archive_term();
 
-    // CASE A: Category Archive Page -> Filter only this category's simple products and child variations
+    //Category Archive Page -> Filter only this category's simple products and child variations
     if ( $term && isset( $term->taxonomy, $term->term_id ) ) {
         $term_ids = get_term_children( $term->term_id, $term->taxonomy );
         $term_ids[] = (int) $term->term_id;
         $term_ids_in = implode( ',', array_map( 'intval', array_filter( $term_ids ) ) );
 
-        // 1. Simple products in this category
+        //Simple products in this category
         $simple_ids = $wpdb->get_col( "
             SELECT DISTINCT tr.object_id 
             FROM {$wpdb->term_relationships} tr
@@ -79,7 +73,7 @@ add_filter( 'wpto_table_query_args', function( $args, $table_id ) {
             AND t_type.slug = 'simple'
         " );
 
-        // 2. Child variations belonging to parents in this category
+        //Child variations belonging to parents in this category
         $variation_ids = $wpdb->get_col( "
             SELECT DISTINCT v.ID 
             FROM {$wpdb->posts} v
@@ -101,7 +95,7 @@ add_filter( 'wpto_table_query_args', function( $args, $table_id ) {
         return $args;
     }
 
-    // CASE B: Main Shop Page -> Load ALL simple products + ALL child variations (39 pages / 1162 items)
+    //Main Shop Page -> Load ALL simple products + ALL child variations (39 pages / 1162 items)
     $args['post_type'] = array( 'product', 'product_variation' );
     
     // Hide variable parent products so only single variations & simple products show
@@ -117,7 +111,7 @@ add_filter( 'wpto_table_query_args', function( $args, $table_id ) {
     return $args;
 }, 99, 2 );
 
-// 3. Hide duplicate theme pagination in Table View
+//Hide duplicate theme pagination in Table View
 add_action( 'wp_head', function() {
     if ( is_shop() || is_product_taxonomy() ) {
         $view = $_GET['view'] ?? 'table';
