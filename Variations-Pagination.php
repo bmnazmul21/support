@@ -1,20 +1,18 @@
 <?php
-/**
- * Woo Product Table: Fix Shop Variations (41 Pages) & Category Filtering
- * 
- * 1. Bypasses archive locks to query simple products + child variations (41 pages / 1220 items).
- * 2. Filters strictly by category & child variations on Category pages.
- * 3. Hides theme duplicate pagination (25-page bar) so only Table 41-page pagination shows.
- */
 
-// 1. Remove theme archive query manipulation
-add_action( 'wp', function() {
-    remove_filter( 'wpto_table_query_args', 'wpt_args_manipulation_frontend', 10 );
-    remove_filter( 'wpto_table_query_args', 'wpt_shop_archive_sorting_args', 10 );
-    remove_filter( 'wpto_table_query_args_in_row', 'wpt_shop_archive_sorting_args', 10 );
-} );
+// Get the active archive table ID from Woo Product Table settings
+function wpt_get_configured_archive_table_id() {
+    $config = get_option( 'wpt_configure_options' );
+    $is_on  = ! empty( $config['table_on_archive'] ) && $config['table_on_archive'] === 'on';
 
-// Helper function to detect archive category on initial load and AJAX
+    if ( $is_on && ! empty( $config['archive_table_id'] ) ) {
+        return (int) $config['archive_table_id'];
+    }
+
+    return 0;
+}
+
+// Detect active product category on initial load and AJAX
 function wpt_get_active_archive_term() {
     if ( is_product_category() || is_product_taxonomy() || is_tax() ) {
         $term = get_queried_object();
@@ -29,7 +27,7 @@ function wpt_get_active_archive_term() {
             $path = trim( (string) parse_url( $url, PHP_URL_PATH ), '/' );
             $path = preg_replace( '#/page/\d+/?$#', '', $path );
             $slug = basename( $path );
-            if ( $slug && $slug !== 'wholesale-b2b-supplies' && $slug !== 'shop' ) {
+            if ( $slug && $slug !== 'shop' && ! is_numeric( $slug ) ) {
                 $term = get_term_by( 'slug', $slug, 'product_cat' );
                 if ( $term instanceof WP_Term ) {
                     return $term;
@@ -41,23 +39,67 @@ function wpt_get_active_archive_term() {
     return false;
 }
 
-// 2. Query simple products and child variations for Table 40709
+// Check if the current request is for the shop or archive table
+function wpt_is_archive_table_request( $table_id ) {
+    $archive_table_id = wpt_get_configured_archive_table_id();
+
+    if ( $archive_table_id && (int) $table_id === $archive_table_id ) {
+        return true;
+    }
+
+    if ( is_product_taxonomy() || is_tax() ) {
+        $term_id = get_queried_object_id();
+        $term_table_id = (int) get_term_meta( $term_id, 'table_id', true );
+        if ( $term_table_id && (int) $table_id === $term_table_id ) {
+            return true;
+        }
+    }
+
+    if ( is_shop() || is_product_taxonomy() ) {
+        return true;
+    }
+
+    return false;
+}
+
+// Remove default WooCommerce archive filters and pagination for table view
+add_action( 'wp', function() {
+    remove_filter( 'wpto_table_query_args', 'wpt_args_manipulation_frontend', 10 );
+    remove_filter( 'wpto_table_query_args', 'wpt_shop_archive_sorting_args', 10 );
+    remove_filter( 'wpto_table_query_args_in_row', 'wpt_shop_archive_sorting_args', 10 );
+
+    $view = $_GET['view'] ?? 'table';
+    $view = apply_filters( 'wpt_archive_layout', $view );
+
+    if ( ( is_shop() || is_product_taxonomy() ) && $view !== 'grid' ) {
+        remove_action( 'woocommerce_after_shop_loop', 'woocommerce_pagination', 10 );
+        remove_action( 'woocommerce_after_shop_loop', 'woocommerce_result_count', 20 );
+        remove_action( 'woocommerce_after_shop_loop', 'woocommerce_catalog_ordering', 30 );
+    }
+} );
+
+// Prevent server cache from serving stale table HTML on archive pages
+add_action( 'send_headers', function() {
+    if ( is_shop() || is_product_taxonomy() ) {
+        header( 'X-LiteSpeed-Cache-Control: no-cache' );
+    }
+} );
+
+// Query simple products and child variations for shop and archive pages
 add_filter( 'wpto_table_query_args', function( $args, $table_id ) {
     global $wpdb;
 
-    if ( $table_id != 40709 ) {
+    if ( ! wpt_is_archive_table_request( $table_id ) ) {
         return $args;
     }
 
     $term = wpt_get_active_archive_term();
 
-    // CASE A: Category Archive Page -> Filter only this category's simple products and child variations
     if ( $term && isset( $term->taxonomy, $term->term_id ) ) {
         $term_ids = get_term_children( $term->term_id, $term->taxonomy );
         $term_ids[] = (int) $term->term_id;
         $term_ids_in = implode( ',', array_map( 'intval', array_filter( $term_ids ) ) );
 
-        // 1. Simple products in this category
         $simple_ids = $wpdb->get_col( "
             SELECT DISTINCT tr.object_id 
             FROM {$wpdb->term_relationships} tr
@@ -71,7 +113,6 @@ add_filter( 'wpto_table_query_args', function( $args, $table_id ) {
             AND t_type.slug = 'simple'
         " );
 
-        // 2. Child variations belonging to parents in this category
         $variation_ids = $wpdb->get_col( "
             SELECT DISTINCT v.ID 
             FROM {$wpdb->posts} v
@@ -93,10 +134,7 @@ add_filter( 'wpto_table_query_args', function( $args, $table_id ) {
         return $args;
     }
 
-    // CASE B: Main Shop Page -> Load ALL simple products + ALL child variations (41 pages / 1220 items)
     $args['post_type'] = array( 'product', 'product_variation' );
-    
-    // Hide variable parent products so only single variations & simple products show
     $args['tax_query'][] = array(
         'taxonomy' => 'product_type',
         'field'    => 'slug',
@@ -109,28 +147,25 @@ add_filter( 'wpto_table_query_args', function( $args, $table_id ) {
     return $args;
 }, 99, 2 );
 
-// 3. Guaranteed Hide Theme Pagination in Table View
-add_action( 'wp_footer', function() {
-    $view = $_GET['view'] ?? 'table';
-    $view = apply_filters( 'wpt_archive_layout', $view );
+// Hide duplicate theme pagination in table view
+add_action( 'wp_head', function() {
+    if ( is_shop() || is_product_taxonomy() ) {
+        $view = $_GET['view'] ?? 'table';
+        $view = apply_filters( 'wpt_archive_layout', $view );
 
-    // Apply hiding ONLY when viewing the table
-    if ( $view !== 'grid' ) {
-        ?>
-        <style id="wpt-hide-theme-pagination">
-            /* Hide Shoptimizer & WooCommerce theme duplicate pagination */
-            body .woocommerce-pagination,
-            body nav.woocommerce-pagination,
-            body .shoptimizer-sorting,
-            body .woocommerce-after-shop-loop {
-                display: none !important;
-            }
-            /* Keep Woo Product Table 41-page pagination clearly visible */
-            body .wpt_my_pagination,
-            body .wpt_table_pagination {
-                display: block !important;
-            }
-        </style>
-        <?php
+        if ( $view !== 'grid' ) {
+            ?>
+            <style>
+                body:has(.wpt_product_table_wrapper) nav.woocommerce-pagination,
+                body:has(.wpt_product_table_wrapper) .shoptimizer-sorting,
+                body:has(.wpt_product_table_wrapper) .woocommerce-after-shop-loop {
+                    display: none !important;
+                }
+                .wpt-pagination {
+                    display: block !important;
+                }
+            </style>
+            <?php
+        }
     }
-}, 9999 );
+} );
