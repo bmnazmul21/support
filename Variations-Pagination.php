@@ -150,7 +150,79 @@ add_filter( 'wpto_table_query_args', function( $args, $table_id ) {
     return $args;
 }, 5, 2 );
 
-// 6. Manage product query for category archives and shop/table pages
+// 6. Detect active taxonomy filters (such as brands and attributes) from URL and AJAX
+function wpt_get_active_tax_filters() {
+    $tax_filters = array();
+
+    $params = $_GET;
+    if ( wp_doing_ajax() ) {
+        $url = $_POST['args']['base_link'] ?? wp_get_raw_referer() ?? ( $_SERVER['HTTP_REFERER'] ?? '' );
+        if ( $url ) {
+            $query_str = (string) parse_url( $url, PHP_URL_QUERY );
+            if ( $query_str ) {
+                parse_str( $query_str, $ajax_params );
+                $params = array_merge( $params, $ajax_params );
+            }
+        }
+    }
+
+    foreach ( $params as $key => $val ) {
+        if ( empty( $val ) ) {
+            continue;
+        }
+        if ( strpos( $key, 'filter_' ) === 0 ) {
+            $tax_name = substr( $key, 7 );
+            if ( ! taxonomy_exists( $tax_name ) && taxonomy_exists( 'pa_' . $tax_name ) ) {
+                $tax_name = 'pa_' . $tax_name;
+            }
+            if ( taxonomy_exists( $tax_name ) ) {
+                $raw_terms = is_array( $val ) ? $val : explode( ',', (string) $val );
+                $term_ids = array();
+                foreach ( $raw_terms as $t ) {
+                    $t = trim( $t );
+                    if ( is_numeric( $t ) ) {
+                        $term_ids[] = (int) $t;
+                    } else {
+                        $term_obj = get_term_by( 'slug', sanitize_title( $t ), $tax_name );
+                        if ( $term_obj && ! empty( $term_obj->term_id ) ) {
+                            $term_ids[] = (int) $term_obj->term_id;
+                        }
+                    }
+                }
+                if ( ! empty( $term_ids ) ) {
+                    $tax_filters[$tax_name] = array_unique( $term_ids );
+                }
+            }
+        }
+    }
+
+    if ( wp_doing_ajax() && ! empty( $_POST['args']['tax_query'] ) && is_array( $_POST['args']['tax_query'] ) ) {
+        foreach ( $_POST['args']['tax_query'] as $tax_item ) {
+            if ( is_array( $tax_item ) && ! empty( $tax_item['taxonomy'] ) && $tax_item['taxonomy'] !== 'product_cat' && ! empty( $tax_item['terms'] ) ) {
+                $t_name = $tax_item['taxonomy'];
+                $raw_terms = is_array( $tax_item['terms'] ) ? $tax_item['terms'] : array( $tax_item['terms'] );
+                $term_ids = array();
+                foreach ( $raw_terms as $t ) {
+                    if ( is_numeric( $t ) ) {
+                        $term_ids[] = (int) $t;
+                    } else {
+                        $term_obj = get_term_by( 'slug', sanitize_title( $t ), $t_name );
+                        if ( $term_obj && ! empty( $term_obj->term_id ) ) {
+                            $term_ids[] = (int) $term_obj->term_id;
+                        }
+                    }
+                }
+                if ( ! empty( $term_ids ) ) {
+                    $tax_filters[$t_name] = isset( $tax_filters[$t_name] ) ? array_unique( array_merge( $tax_filters[$t_name], $term_ids ) ) : array_unique( $term_ids );
+                }
+            }
+        }
+    }
+
+    return $tax_filters;
+}
+
+// 7. Manage product query for category archives, brand/attribute filters, and shop pages
 add_filter( 'wpto_table_query_args', function( $args, $table_id ) {
     global $wpdb;
 
@@ -162,25 +234,86 @@ add_filter( 'wpto_table_query_args', function( $args, $table_id ) {
     $args['wpt_exclude_draft_parents'] = true;
 
     $term = wpt_get_active_archive_term();
+    $active_filters = wpt_get_active_tax_filters();
 
-    // Category archive: filter only products and child variations belonging to active term
-    if ( $term && isset( $term->taxonomy, $term->term_id ) ) {
-        $term_ids = get_term_children( $term->term_id, $term->taxonomy );
-        $term_ids[] = (int) $term->term_id;
-        $term_ids_in = implode( ',', array_map( 'intval', array_filter( $term_ids ) ) );
+    // When either a category/taxonomy archive is active OR any filter (brand/attribute) is selected
+    if ( ( $term && isset( $term->taxonomy, $term->term_id ) ) || ! empty( $active_filters ) ) {
+        $cat_joins_simple = "";
+        $cat_where_simple = "";
+        $cat_joins_var    = "";
+        $cat_where_var    = "";
+
+        if ( $term && isset( $term->taxonomy, $term->term_id ) ) {
+            $term_ids = get_term_children( $term->term_id, $term->taxonomy );
+            $term_ids[] = (int) $term->term_id;
+            $term_ids_in = implode( ',', array_map( 'intval', array_filter( $term_ids ) ) );
+
+            $cat_joins_simple = "
+                INNER JOIN {$wpdb->term_relationships} tr_cat ON p.ID = tr_cat.object_id
+                INNER JOIN {$wpdb->term_taxonomy} tt_cat ON tr_cat.term_taxonomy_id = tt_cat.term_taxonomy_id
+            ";
+            $cat_where_simple = "
+                AND tt_cat.taxonomy = '{$term->taxonomy}'
+                AND tt_cat.term_id IN ($term_ids_in)
+            ";
+
+            $cat_joins_var = "
+                INNER JOIN {$wpdb->term_relationships} tr_cat ON p.ID = tr_cat.object_id
+                INNER JOIN {$wpdb->term_taxonomy} tt_cat ON tr_cat.term_taxonomy_id = tt_cat.term_taxonomy_id
+            ";
+            $cat_where_var = "
+                AND tt_cat.taxonomy = '{$term->taxonomy}'
+                AND tt_cat.term_id IN ($term_ids_in)
+            ";
+        }
+
+        $filter_joins_simple = "";
+        $filter_where_simple = "";
+        $filter_joins_var    = "";
+        $filter_where_var    = "";
+        $f_idx = 0;
+
+        foreach ( $active_filters as $f_tax => $f_term_ids ) {
+            if ( $term && $term->taxonomy === $f_tax ) {
+                continue;
+            }
+            $f_idx++;
+            $f_term_ids_in = implode( ',', array_map( 'intval', array_filter( $f_term_ids ) ) );
+            if ( empty( $f_term_ids_in ) ) {
+                continue;
+            }
+
+            $filter_joins_simple .= "
+                INNER JOIN {$wpdb->term_relationships} tr_f{$f_idx} ON p.ID = tr_f{$f_idx}.object_id
+                INNER JOIN {$wpdb->term_taxonomy} tt_f{$f_idx} ON tr_f{$f_idx}.term_taxonomy_id = tt_f{$f_idx}.term_taxonomy_id
+            ";
+            $filter_where_simple .= "
+                AND tt_f{$f_idx}.taxonomy = '{$f_tax}'
+                AND tt_f{$f_idx}.term_id IN ($f_term_ids_in)
+            ";
+
+            $filter_joins_var .= "
+                INNER JOIN {$wpdb->term_relationships} tr_f{$f_idx} ON (tr_f{$f_idx}.object_id = p.ID OR tr_f{$f_idx}.object_id = v.ID)
+                INNER JOIN {$wpdb->term_taxonomy} tt_f{$f_idx} ON tr_f{$f_idx}.term_taxonomy_id = tt_f{$f_idx}.term_taxonomy_id
+            ";
+            $filter_where_var .= "
+                AND tt_f{$f_idx}.taxonomy = '{$f_tax}'
+                AND tt_f{$f_idx}.term_id IN ($f_term_ids_in)
+            ";
+        }
 
         $simple_ids = $wpdb->get_col( "
             SELECT DISTINCT p.ID 
             FROM {$wpdb->posts} p
-            INNER JOIN {$wpdb->term_relationships} tr ON p.ID = tr.object_id
-            INNER JOIN {$wpdb->term_taxonomy} tt ON tr.term_taxonomy_id = tt.term_taxonomy_id
+            $cat_joins_simple
+            $filter_joins_simple
             INNER JOIN {$wpdb->term_relationships} tr_type ON p.ID = tr_type.object_id
             INNER JOIN {$wpdb->term_taxonomy} tt_type ON tr_type.term_taxonomy_id = tt_type.term_taxonomy_id
             INNER JOIN {$wpdb->terms} t_type ON tt_type.term_id = t_type.term_id
             WHERE p.post_type = 'product'
             AND p.post_status = 'publish'
-            AND tt.taxonomy = '{$term->taxonomy}'
-            AND tt.term_id IN ($term_ids_in)
+            $cat_where_simple
+            $filter_where_simple
             AND tt_type.taxonomy = 'product_type'
             AND t_type.slug = 'simple'
         " );
@@ -189,25 +322,25 @@ add_filter( 'wpto_table_query_args', function( $args, $table_id ) {
             SELECT DISTINCT v.ID 
             FROM {$wpdb->posts} v
             INNER JOIN {$wpdb->posts} p ON v.post_parent = p.ID
-            INNER JOIN {$wpdb->term_relationships} tr ON p.ID = tr.object_id
-            INNER JOIN {$wpdb->term_taxonomy} tt ON tr.term_taxonomy_id = tt.term_taxonomy_id
-            WHERE tt.taxonomy = '{$term->taxonomy}'
-            AND tt.term_id IN ($term_ids_in)
-            AND v.post_type = 'product_variation'
+            $cat_joins_var
+            $filter_joins_var
+            WHERE v.post_type = 'product_variation'
             AND v.post_status = 'publish'
             AND p.post_status = 'publish'
+            $cat_where_var
+            $filter_where_var
         " );
 
         $target_ids = array_merge( $simple_ids, $variation_ids );
         $args['post_type']   = array( 'product', 'product_variation' );
         $args['post_status'] = 'publish';
-        $args['post__in']    = ! empty( $target_ids ) ? array_map( 'intval', $target_ids ) : array( 0 );
+        $args['post__in']    = ! empty( $target_ids ) ? array_map( 'intval', array_unique( $target_ids ) ) : array( 0 );
         unset( $args['tax_query'] );
 
         return $args;
     }
 
-    // Shop and full catalogue pages: simple products + published variations
+    // Shop and full catalogue pages without active filters: simple products + published variations
     $args['post_type']   = array( 'product', 'product_variation' );
     $args['post_status'] = 'publish';
     $args['tax_query'][] = array(
@@ -222,7 +355,7 @@ add_filter( 'wpto_table_query_args', function( $args, $table_id ) {
     return $args;
 }, 99, 2 );
 
-// 7. Remove default WooCommerce archive filters and pagination for table view
+// 8. Remove default WooCommerce archive filters and pagination for table view
 add_action( 'wp', function() {
     remove_filter( 'wpto_table_query_args', 'wpt_args_manipulation_frontend', 10 );
     remove_filter( 'wpto_table_query_args', 'wpt_shop_archive_sorting_args', 10 );
@@ -238,14 +371,14 @@ add_action( 'wp', function() {
     }
 } );
 
-// 8. Prevent server cache from serving stale table HTML on archive pages
+// 9. Prevent server cache from serving stale table HTML on archive pages
 add_action( 'send_headers', function() {
     if ( is_shop() || is_product_taxonomy() ) {
         header( 'X-LiteSpeed-Cache-Control: no-cache' );
     }
 } );
 
-// 9. Display quantity plus-minus box even when product stock is 1
+// 10. Display quantity plus-minus box even when product stock is 1
 add_filter( 'woocommerce_quantity_input_args', function( $args, $product ) {
     if ( isset( $args['max_value'] ) && $args['max_value'] > 0 && $args['min_value'] === $args['max_value'] ) {
         $args['min_value'] = 0;
@@ -253,7 +386,7 @@ add_filter( 'woocommerce_quantity_input_args', function( $args, $product ) {
     return $args;
 }, 20, 2 );
 
-// 10. Hide duplicate theme pagination and align quantity buttons on mobile
+// 11. Hide duplicate theme pagination and align quantity buttons on mobile
 add_action( 'wp_head', function() {
     ?>
     <style>
@@ -291,7 +424,7 @@ add_action( 'wp_head', function() {
     <?php
 } );
 
-// 11. Smoothly scroll up to the top of table when pagination is clicked
+// 12. Smoothly scroll up to the top of table when pagination is clicked
 add_action( 'wp_footer', function() {
     ?>
     <script>
