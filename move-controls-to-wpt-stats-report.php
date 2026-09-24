@@ -1,4 +1,3 @@
-<?php
 add_action( 'wp_footer', function() {
     ?>
     <style type="text/css">
@@ -52,6 +51,23 @@ add_action( 'wp_footer', function() {
         var table_selector = '.wpt-datatable .wpt-table-tag.wpt_product_table, .wpt_product_table_wrapper .wpt-table-tag.wpt_product_table';
 
         /**
+         * Get the current user-selected page length
+         */
+        function getSelectedPageLength($wrapper) {
+            var $select = $wrapper.find('.dataTables_length select');
+            if ($select.length) {
+                var val = parseInt($select.val(), 10);
+                if (!isNaN(val)) return val;
+            }
+            var $savedLength = $wrapper.data('wpt_saved_length');
+            if ($savedLength && $savedLength.find('select').length) {
+                var sVal = parseInt($savedLength.find('select').val(), 10);
+                if (!isNaN(sVal)) return sVal;
+            }
+            return null;
+        }
+
+        /**
          * Relocate length dropdown and search filter into .wpt-stats-report
          */
         function placeControlsInStats($wrapper) {
@@ -88,13 +104,24 @@ add_action( 'wp_footer', function() {
                     $stats.append($filter);
                 }
             }
+
+            // Sync select value with DataTables current page length
+            var $table = $wrapper.find('.wpt-table-tag.wpt_product_table');
+            if ($table.length && $.fn.DataTable && $.fn.DataTable.isDataTable($table[0])) {
+                var dt = $table.DataTable();
+                var currentLen = dt.page.len();
+                var $select = $stats.find('.dataTables_length select');
+                if ($select.length && parseInt($select.val(), 10) !== currentLen) {
+                    $select.val(currentLen);
+                }
+            }
         }
 
         /**
          * Update stats post count and page count text dynamically
          */
         function updateStatsCounts($table, $statsReport) {
-            if (!$statsReport.length || !$.fn.DataTable.isDataTable($table[0])) return;
+            if (!$statsReport.length || !$.fn.DataTable || !$.fn.DataTable.isDataTable($table[0])) return;
 
             var api = $table.DataTable();
             var info = api.page.info();
@@ -110,6 +137,17 @@ add_action( 'wp_footer', function() {
             var $pageCountEl = $statsReport.find('.wpt-stats-page-count');
 
             if ($postCountEl.length) {
+                // Auto-detect and cache localized format (preserves German "1 - 19 von 19")
+                if (!$postCountEl.attr('data-format')) {
+                    var rawText = $postCountEl.text().trim();
+                    var match = rawText.match(/^(.*?)(\d+\s*-\s*\d+)(.*?)(\d+)(.*?)$/);
+                    if (match) {
+                        $postCountEl.attr('data-format', match[1] + '%1$s' + match[3] + '%2$s' + match[5]);
+                    } else {
+                        $postCountEl.attr('data-format', 'Showing %1$s out of %2$s');
+                    }
+                }
+
                 var postFormat = $postCountEl.attr('data-format') || 'Showing %1$s out of %2$s';
                 var displayCount = start + ' - ' + end;
                 var formattedPost = postFormat
@@ -124,6 +162,17 @@ add_action( 'wp_footer', function() {
             }
 
             if ($pageCountEl.length) {
+                // Auto-detect and cache localized format (preserves German "Seite 1 von 1")
+                if (!$pageCountEl.attr('data-format')) {
+                    var rawPageText = $pageCountEl.text().trim();
+                    var pageMatch = rawPageText.match(/^(.*?)(\d+)(.*?)(\d+)(.*?)$/);
+                    if (pageMatch) {
+                        $pageCountEl.attr('data-format', pageMatch[1] + '%1$s' + pageMatch[3] + '%2$s' + pageMatch[5]);
+                    } else {
+                        $pageCountEl.attr('data-format', 'Page %1$s out of %2$s');
+                    }
+                }
+
                 var pageFormat = $pageCountEl.attr('data-format') || 'Page %1$s out of %2$s';
                 var formattedPage = pageFormat
                     .replace('%1$s', currentPage)
@@ -183,6 +232,8 @@ add_action( 'wp_footer', function() {
                 var isObserving = false;
                 var observer = new MutationObserver(function() {
                     if (isObserving) return;
+                    // Do NOT re-insert while an AJAX request is actively in progress
+                    if ($wrapper.data('wpt_ajax_in_progress')) return;
                     if (!$statsReport.find('.dataTables_length').length) {
                         isObserving = true;
                         placeControlsInStats($wrapper);
@@ -195,8 +246,6 @@ add_action( 'wp_footer', function() {
 
         /**
          * Update DataTables rows after AJAX search/filter
-         * NEVER use destroy() because destroy() restores cached old rows!
-         * Instead, clear and add ONLY the newly searched rows.
          */
         function updateDataTableRows($table) {
             if (!$.fn.DataTable) return;
@@ -211,12 +260,20 @@ add_action( 'wp_footer', function() {
             var $newRows = $table.find('tbody tr.wpt-row').detach();
             var $notFound = $table.find('tbody tr.product-not-found-tr').detach();
 
+            // Check if user had a chosen page length (e.g. 10)
+            var chosenLen = getSelectedPageLength($wrapper);
+
             // Clear previous rows from DataTables cache
             dt.clear();
 
             // Add ONLY the new search result rows
             if ($newRows.length) {
                 dt.rows.add($newRows);
+            }
+
+            // Apply selected page length if available
+            if (chosenLen) {
+                dt.page.len(chosenLen);
             }
 
             // Reset to first page and redraw
@@ -229,6 +286,48 @@ add_action( 'wp_footer', function() {
 
             placeControlsInStats($wrapper);
         }
+
+        // =========================================================================
+        // DELEGATED EVENT HANDLERS (Immune to DOM replacements & AJAX re-renders)
+        // =========================================================================
+
+        /**
+         * 1. Change Page Length ("Show 10 / 25 / 50 products")
+         * Delegated on $(document) so it ALWAYS triggers dt.page.len().draw()
+         */
+        $(document).on('change', '.wpt-stats-report .dataTables_length select, .wpt-datatable .dataTables_length select, .wpt_product_table_wrapper .dataTables_length select', function() {
+            var $select = $(this);
+            var newLength = parseInt($select.val(), 10);
+            if (isNaN(newLength)) return;
+
+            var $wrapper = $select.closest('.wpt_product_table_wrapper, .wpt-datatable');
+            var $table = $wrapper.find('.wpt-table-tag.wpt_product_table');
+
+            if ($table.length && $.fn.DataTable && $.fn.DataTable.isDataTable($table[0])) {
+                var dt = $table.DataTable();
+                dt.page.len(newLength).draw();
+            }
+        });
+
+        /**
+         * 2. Instant Search Filter ("Search: ...")
+         * Delegated on $(document) so instant filtering continues to work after AJAX
+         */
+        $(document).on('input keyup cut paste', '.wpt-stats-report .dataTables_filter input, .wpt-datatable .dataTables_filter input, .wpt_product_table_wrapper .dataTables_filter input', function() {
+            var $input = $(this);
+            var query = $input.val();
+            var $wrapper = $input.closest('.wpt_product_table_wrapper, .wpt-datatable');
+            var $table = $wrapper.find('.wpt-table-tag.wpt_product_table');
+
+            if ($table.length && $.fn.DataTable && $.fn.DataTable.isDataTable($table[0])) {
+                var dt = $table.DataTable();
+                dt.search(query).draw();
+            }
+        });
+
+        // =========================================================================
+        // LIFECYCLE & AJAX HOOKS
+        // =========================================================================
 
         // 1. Initial Page Load
         $(document).ready(function() {
@@ -247,11 +346,14 @@ add_action( 'wp_footer', function() {
             });
         });
 
-        // 2. Before AJAX request sends: cache and detach dropdown elements to protect them from .html() overwrite
+        // 2. Before AJAX request sends:
+        // Set in-progress flag to stop MutationObserver from re-inserting prematurely,
+        // and safely detach controls to protect them from being purged by jQuery .html()
         $(document).ajaxSend(function(event, jqXHR, settings) {
             if (settings && settings.data && typeof settings.data === 'string' && settings.data.indexOf('action=wpt_load_both') !== -1) {
                 $('.wpt-datatable, .wpt_product_table_wrapper').each(function() {
                     var $wrapper = $(this);
+                    $wrapper.data('wpt_ajax_in_progress', true);
                     var $stats = $wrapper.find('.wpt-stats-report');
                     var $len = $stats.find('.dataTables_length').detach();
                     var $flt = $stats.find('.dataTables_filter').detach();
@@ -261,8 +363,11 @@ add_action( 'wp_footer', function() {
             }
         });
 
-        // 3. When WPT finishes AJAX search/filtering: sync DataTables with new rows only!
+        // 3. When WPT finishes AJAX search/filtering: sync DataTables with new rows
         $(document.body).on('wpt_ajax_loaded', function() {
+            $('.wpt-datatable, .wpt_product_table_wrapper').each(function() {
+                $(this).data('wpt_ajax_in_progress', false);
+            });
             $(table_selector).each(function() {
                 updateDataTableRows($(this));
             });
@@ -271,6 +376,9 @@ add_action( 'wp_footer', function() {
         // 4. Fallback on ajaxComplete
         $(document).ajaxComplete(function(event, xhr, settings) {
             if (settings && settings.data && typeof settings.data === 'string' && settings.data.indexOf('action=wpt_load_both') !== -1) {
+                $('.wpt-datatable, .wpt_product_table_wrapper').each(function() {
+                    $(this).data('wpt_ajax_in_progress', false);
+                });
                 setTimeout(function() {
                     $('.wpt-datatable, .wpt_product_table_wrapper').each(function() {
                         placeControlsInStats($(this));
