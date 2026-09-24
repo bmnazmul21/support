@@ -1,5 +1,4 @@
 <?php
-
 // 1. Get the active archive table ID dynamically from Woo Product Table settings
 function wpt_get_configured_archive_table_id() {
     $config = get_option( 'wpt_configure_options' );
@@ -254,25 +253,69 @@ add_filter( 'woocommerce_quantity_input_args', function( $args, $product ) {
     return $args;
 }, 20, 2 );
 
-// 10. Hide duplicate theme pagination in table view
+// 10. Hide duplicate theme pagination and align quantity buttons on mobile
 add_action( 'wp_head', function() {
-    if ( is_shop() || is_product_taxonomy() ) {
-        $view = $_GET['view'] ?? 'table';
-        $view = apply_filters( 'wpt_archive_layout', $view );
-
-        if ( $view !== 'grid' ) {
-            ?>
-            <style>
-                body:has(.wpt_product_table_wrapper) nav.woocommerce-pagination,
-                body:has(.wpt_product_table_wrapper) .shoptimizer-sorting,
-                body:has(.wpt_product_table_wrapper) .woocommerce-after-shop-loop {
-                    display: none !important;
-                }
-                .wpt-pagination {
-                    display: block !important;
-                }
-            </style>
-            <?php
+    ?>
+    <style>
+        body:has(.wpt_product_table_wrapper) nav.woocommerce-pagination,
+        body:has(.wpt_product_table_wrapper) .shoptimizer-sorting,
+        body:has(.wpt_product_table_wrapper) .woocommerce-after-shop-loop {
+            display: none !important;
         }
-    }
+        .wpt-pagination {
+            display: block !important;
+        }
+
+        /* Mobile only: quantity button left align */
+        @media only screen and (max-width: 767px) {
+            body .wpt-wrap .qib-button-wrapper,
+            .wpt-wrap .qib-button-wrapper {
+                display: flex !important;
+                float: left !important;
+                margin-left: 0 !important;
+                margin-right: auto !important;
+                justify-content: flex-start !important;
+            }
+
+            .wpt-wrap .wpt-td-tag.wpt_quantity,
+            .wpt-wrap .wpt-td-tag.wpt_quantity div.quantity,
+            .wpt-wrap .item_inside_cell.wpt_quantity,
+            .wpt-wrap .wpt_quantity .tag_or_div,
+            .wpt-wrap .wpt_quantity .welcome-to-all {
+                text-align: left !important;
+                justify-content: flex-start !important;
+                align-items: flex-start !important;
+            }
+        }
+    </style>
+    <?php
+} );
+
+// 11. Smoothly scroll up to the top of table when pagination is clicked
+add_action( 'wp_footer', function() {
+    ?>
+    <script>
+    jQuery(function($) {
+        $(document.body).on('click', '.wpt_my_pagination a, .wpt_table_pagination a', function() {
+            var $table = $(this).closest('.wpt_product_table_wrapper, .wpt-wrap');
+            if (!$table.length) {
+                $table = $('.wpt_product_table_wrapper:visible:first, .wpt-wrap:visible:first');
+            }
+            if ($table.length) {
+                var targetTop = $table.offset().top - 90;
+                if (targetTop < 0) targetTop = 0;
+
+                if ('scrollBehavior' in document.documentElement.style) {
+                    window.scrollTo({
+                        top: targetTop,
+                        behavior: 'smooth'
+                    });
+                } else {
+                    $('html, body').stop().animate({ scrollTop: targetTop }, 800, 'swing');
+                }
+            }
+        });
+    });
+    </script>
+    <?php
 } );
