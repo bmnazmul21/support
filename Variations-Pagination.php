@@ -452,3 +452,46 @@ add_action( 'wp_footer', function() {
     </script>
     <?php
 } );
+// Automatically show Waitlist button inside Quick Qty OR Action column for out-of-stock products
+add_filter( 'wpt_td_content', function( $content, $row, $column_key ) {
+    // Supports both 'quick_qty' and 'action' columns dynamically
+    if ( in_array( $column_key, array( 'quick_qty', 'action' ), true ) ) {
+        $stock_status = $row->product_stock_status ?? '';
+        if ( ! $stock_status && ! empty( $row->product_id ) ) {
+            $product = wc_get_product( $row->product_id );
+            if ( $product ) {
+                $stock_status = $product->get_stock_status();
+            }
+        }
+        if ( $stock_status === 'outofstock' && function_exists( 'xoo_wl_frontend' ) ) {
+            ob_start();
+            xoo_wl_frontend()->get_waitlist_markup_for_product_page();
+            $markup = ob_get_clean();
+            if ( ! empty( $markup ) ) {
+                return $markup;
+            }
+        }
+    }
+    return $content;
+}, 20, 3 );
+
+// Style table columns and Waitlist button inside Action / Quick Qty
+add_action( 'wp_head', function() {
+    ?>
+    <style>
+        .wpt-wrap table.wpt_product_table th.wpt_product_title,
+        .wpt-wrap table.wpt_product_table td.wpt_product_title {
+            width: auto !important;
+            min-width: 250px !important;
+            text-align: left !important;
+        }
+        .wpt-wrap td.wpt_quick_qty .xoo-wl-action-btn,
+        .wpt-wrap td.wpt_action .xoo-wl-action-btn {
+            padding: 6px 12px !important;
+            font-size: 13px !important;
+            white-space: nowrap !important;
+            line-height: 1.3 !important;
+        }
+    </style>
+    <?php
+} );
