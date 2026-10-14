@@ -1,6 +1,5 @@
 <?php
-
-// 1. Enqueue WPT styles and scripts on Search and Archive pages
+// 1. Enqueue WPT styles, fonts, and scripts on Search and Archive pages
 add_action( 'wp_enqueue_scripts', function() {
     if ( is_search() || isset( $_GET['type_aws'] ) || isset( $_GET['s'] ) ) {
         // Enqueue common fontello icon assets
@@ -15,6 +14,7 @@ add_action( 'wp_enqueue_scripts', function() {
 
             wp_enqueue_style( 'wpt-universal', $base_url . 'assets/css/universal.css', array(), $version, 'all' );
             wp_enqueue_style( 'wpt-fontello', $base_url . 'assets/fontello/css/wptfontelo.css', array(), $version, 'all' );
+            wp_enqueue_style( 'animate', $base_url . 'assets/fontello/css/animation.css', array(), $version, 'all' );
             wp_enqueue_style( 'wpt-template', $base_url . 'assets/css/base-template.css', array( 'wpt-universal' ), $version, 'all' );
             wp_enqueue_style( 'wpt-template-default', $base_url . 'assets/css/templates/default.css', array( 'wpt-template' ), $version, 'all' );
             wp_enqueue_style( 'wpt-override-template', $base_url . 'assets/css/override-root.css', array( 'wpt-template-default' ), $version, 'all' );
@@ -40,11 +40,11 @@ add_action( 'wp_enqueue_scripts', function() {
     }
 }, 5 );
 
-// 2. Client-side Synchronization, Cross (x) Button, Badge Styling & Event Handlers
+// 2. Client-side Synchronization, Capture-Phase Loader, Badges & Events
 add_action( 'wp_footer', function() {
     ?>
     <style type="text/css">
-        /* Keep Action cell and elements aligned side-by-side without line breaks */
+        /* Align Action cell elements side-by-side without wrapping */
         .wpt_row td.wpt_action,
         .wpt_row .wpt_action,
         .wpt_row .item_inside_cell.wpt_action {
@@ -80,7 +80,7 @@ add_action( 'wp_footer', function() {
             transform: scale(1.1);
         }
 
-        /* "Add to cart" button and floating orange quantity count badge */
+        /* "Add to cart" button and floating orange quantity count / loader badge */
         .wpt_row .wpt_action a.add_to_cart_button,
         .wpt_row .wpt_action .wpt_woo_add_cart_button {
             position: relative !important;
@@ -100,23 +100,15 @@ add_action( 'wp_footer', function() {
             width: 20px !important;
             height: 20px !important;
             border-radius: 50% !important;
-            display: inline-block !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
             z-index: 2 !important;
         }
-
-        /* Consistent button loading spinner animation */
-        .wpt_row .add_to_cart_button.loading::after,
-        .wpt_row .wpt_woo_add_cart_button.loading::after {
-            font-family: WooCommerce;
-            content: "\e01e";
+        .wpt_row .wpt_action .wpt_ccount i.wpt-spin5 {
             display: inline-block;
-            margin-left: 8px;
-            vertical-align: middle;
-            animation: wpt-spin 1.5s linear infinite;
-        }
-        @keyframes wpt-spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            font-size: 11px;
+            line-height: 1;
         }
     </style>
 
@@ -149,7 +141,7 @@ add_action( 'wp_footer', function() {
                                 var qty = item.quantity;
                                 var key = item.cart_item_key;
 
-                                // 1. Render or update orange count badge
+                                // 1. Render or update orange count badge with quantity
                                 var bubble = thisRow.find('.wpt_ccount');
                                 if (bubble.length === 0) {
                                     btn.append('<span class="wpt_ccount wpt_ccount_' + pid + '">' + qty + '</span>');
@@ -172,7 +164,6 @@ add_action( 'wp_footer', function() {
                             }
                         });
                     }
-                    $('a.add_to_cart_button, .wpt_woo_add_cart_button').removeClass('loading');
                 },
                 complete: function() {
                     isRefreshing = false;
@@ -196,21 +187,35 @@ add_action( 'wp_footer', function() {
                 var minQty = parseFloat($qtyInput.attr('min')) || 1;
                 $qtyInput.val(minQty);
                 $row.attr('data-quantity', minQty);
-                $row.find('a.add_to_cart_button, .wpt_woo_add_cart_button').attr('data-quantity', minQty).removeClass('loading');
+                $row.find('a.add_to_cart_button, .wpt_woo_add_cart_button').attr('data-quantity', minQty);
             }
 
             setTimeout(refreshWptCartButtons, 400);
         }
 
-        // 1. Click on "Add to cart": trigger loader animation and record clicked row
-        $(document).on('click', '.wpt_row a.add_to_cart_button, .wpt_row .wpt_woo_add_cart_button', function() {
-            var $btn = $(this);
-            $btn.addClass('loading');
-            $lastClickedRow = $btn.closest('.wpt_row');
-            var visibleQty = parseFloat($lastClickedRow.find('.wpt_quantity input.qty').val()) || 1;
-            $btn.attr('data-quantity', visibleQty);
-            $lastClickedRow.attr('data-quantity', visibleQty);
-        });
+        // 1. CAPTURE PHASE LISTENER: Runs BEFORE Caddy's stopPropagation can block it
+        // Guarantees the orange spinning star badge appears immediately on Page 1, Page 2, and all states
+        window.addEventListener('click', function(e) {
+            var btn = e.target.closest ? e.target.closest('.wpt_row a.add_to_cart_button, .wpt_row .wpt_woo_add_cart_button') : null;
+            if (!btn) return;
+
+            var $btn = $(btn);
+            var $row = $btn.closest('.wpt_row');
+            $lastClickedRow = $row;
+
+            var pid = String($row.data('product_id') || $row.attr('data-product_id') || $btn.data('product_id') || $btn.attr('data-product_id') || '0');
+            var qty = parseFloat($row.find('.wpt_quantity input.qty').val()) || 1;
+            $btn.attr('data-quantity', qty);
+            $row.attr('data-quantity', qty);
+
+            // Immediately display the orange circle spinning loader badge
+            var $bubble = $row.find('.wpt_ccount');
+            if ($bubble.length === 0) {
+                $btn.append('<span class="wpt_ccount wpt_ccount_' + pid + '"><i class="wpt-spin5 animate-spin"></i></span>');
+            } else {
+                $bubble.html('<i class="wpt-spin5 animate-spin"></i>');
+            }
+        }, true); // "true" activates Capture Phase!
 
         // 2. Sync quantity input adjustments with row data-quantity attributes
         $(document).on('input change keyup', '.wpt_row .wpt_quantity input.qty', function() {
