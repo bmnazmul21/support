@@ -1,15 +1,4 @@
 <?php
-/**
- * Master Integration: Woo Product Table & Caddy Side Cart
- * 
- * Fixes & Enhancements:
- * 1. Enqueues required WPT styles, fontello icons, and scripts on Search and Archive pages.
- * 2. Prevents the cancel (x) icon from wrapping underneath the "Add to cart" button.
- * 3. Adds a direct AJAX click handler for the cancel (x) icon to ensure instant removal.
- * 4. Enables two-way real-time synchronization with Caddy Side Cart (quantity updates & deletions).
- * 5. Displays a consistent loading spinner on button click across all pages.
- * 6. Automatically resets the quantity input field back to 1 after adding to cart.
- */
 
 // 1. Enqueue WPT styles and scripts on Search and Archive pages
 add_action( 'wp_enqueue_scripts', function() {
