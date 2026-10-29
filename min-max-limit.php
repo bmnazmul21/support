@@ -3,10 +3,11 @@
  * =========================================================================
  * Min Max Control - Global Rules Toggle Switch in Basic Settings Table
  * =========================================================================
+ * - Located exclusively in Basic Settings (Universal Settings) table
  * - Uses native CodeAstrology toggle switch (.switch .slider.round)
  * - Defaults to ON (maintains standard plugin behavior for all products)
  * - Uses synced hidden input & backend filter to reliably save 1 (ON) or 0 (OFF)
- * - When switched OFF: Smoothly hides Min, Max, and Step rows in admin
+ * - When switched OFF: Smoothly hides Min, Max, and Step rows in Basic Settings
  * - When switched OFF: Completely prevents loading frontend scripts (custom.js, CSS),
  *   inline styles, footer JSON data, and cart/checkout validations for unrelated products
  * - Fully compatible with Classic Cart, Blocks Cart, and Store API
@@ -128,11 +129,16 @@ add_action( 'wcmmq_arg_asign', function( $controller ) {
 }, 999 );
 
 /**
- * 4. Inject Native Toggle Switch into Basic Settings Table & Handle Dynamic Hide/Show
+ * 4. Inject Native Toggle Switch strictly into Basic Settings Table ONLY
  */
 add_action( 'admin_footer', function() {
     $screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
     if ( ! $screen || strpos( $screen->id, 'wcmmq' ) === false ) {
+        return;
+    }
+
+    // Do NOT run on Module On/Off or any other subpage
+    if ( isset( $_GET['page'] ) && $_GET['page'] !== 'wcmmq-min-max-control' ) {
         return;
     }
 
@@ -142,9 +148,10 @@ add_action( 'admin_footer', function() {
     ?>
     <script type="text/javascript">
     jQuery(document).ready(function($) {
+        // Target exclusively the Basic/Universal settings table on main settings page
         var $basicTable = $('#wcmmq-universal-settings table.wcmmq-table tbody');
         if ( ! $basicTable.length ) {
-            $basicTable = $('table.wcmmq-table.universal-setting tbody').first();
+            $basicTable = $('#wcmmq-main-configuration-form table.wcmmq-table.universal-setting tbody').first();
         }
         if ( ! $basicTable.length ) {
             return;
