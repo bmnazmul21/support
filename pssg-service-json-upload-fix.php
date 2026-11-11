@@ -1,8 +1,4 @@
 <?php
-/**
- * Hotfix: Sync Master Sheet - Step 4 Service Account JSON Upload for LiteSpeed Server
- * Description: Bypasses include() on temporary upload files to fix "File content is not json!" on LiteSpeed / strict servers.
- */
 add_action('wp_ajax_handle_json_file_upload', 'pssg_hotfix_handle_json_file_upload', 1);
 
 function pssg_hotfix_handle_json_file_upload() {
