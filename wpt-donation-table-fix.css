@@ -1,0 +1,133 @@
+/* ==========================================================
+   Product Table - Full Layout, Alignment & Theme Styling
+   ========================================================== */
+
+/* 1. Ensure action column has adequate width to prevent wrapping */
+.wpt_product_table td.wpt_action {
+    min-width: 250px !important;
+    vertical-align: middle !important;
+}
+
+/* 2. Suppress quantity box for donation (NYP) row */
+.wpt_row.individually-sold div.quantity,
+.wpt_row:has(.nyp) div.quantity {
+    display: none !important;
+}
+
+/* 3. Format donation input box, label, and button (Row 1) */
+.wpt_row.individually-sold td.wpt_action form.cart {
+    display: inline-flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    margin: 0 !important;
+}
+
+/* Align Dollar sign ($) and input box in one horizontal line */
+.wpt_row .nyp {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+    margin: 0 0 8px 0 !important;
+}
+
+/* Position ($) dollar label on the left side */
+.wpt_row .nyp label {
+    display: inline-block !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    color: #444 !important;
+    margin: 0 !important;
+    width: 55px !important;            /* Matches quantity input width from lower rows */
+    text-align: center !important;      /* Centered neatly within the column */
+    line-height: 1 !important;
+    box-sizing: border-box !important;
+}
+
+/* Donation input box */
+.wpt_row .nyp input.nyp-input {
+    width: 129px !important;
+    max-width: 129px !important;
+    height: 38px !important;
+    padding: 0 10px !important;
+    border: 1px solid #ccc !important;
+    border-radius: 4px !important;
+    background-color: #f7f7f7 !important;
+    text-align: center !important;
+    display: block !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+}
+
+/* Donation Add to Cart button - aligns directly underneath the input box */
+.wpt_row.individually-sold .single_add_to_cart_button {
+    margin-left: 63px !important;      /* Offset to match input box position exactly */
+    display: block !important;
+    width: 129px !important;
+    box-sizing: border-box !important;
+    text-align: center !important;
+    white-space: nowrap !important;
+}
+
+/* 4. Keep Quantity and Add to Cart button inline for Table & Ticket rows (Rows 2 & 3) */
+.wpt_row:not(.individually-sold) td.wpt_action form.cart {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
+    margin: 0 !important;
+}
+
+.wpt_row:not(.individually-sold) td.wpt_action div.quantity {
+    margin: 0 !important;
+    float: none !important;
+    display: inline-flex !important;
+}
+
+.wpt_row:not(.individually-sold) td.wpt_action div.quantity input.qty {
+    width: 55px !important;
+    height: 38px !important;
+    text-align: center !important;
+    border: 1px solid #ccc !important;
+    border-radius: 4px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+}
+
+.wpt_row:not(.individually-sold) td.wpt_action .single_add_to_cart_button {
+    margin: 0 !important;
+    white-space: nowrap !important;
+}
+
+/* 5. Theme color styling - Apply Teal Blue button styles across all tables */
+.wpt_product_table button.single_add_to_cart_button,
+.wpt_product_table .button.alt,
+.wpt_product_table button.button {
+    background-color: #008dbb !important;
+    color: #ffffff !important;
+    border: none !important;
+    border-radius: 3px !important;
+    padding: 9px 18px !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    line-height: 1.4 !important;
+    cursor: pointer !important;
+    box-shadow: none !important;
+    transition: background-color 0.2s ease !important;
+}
+
+.wpt_product_table button.single_add_to_cart_button:hover,
+.wpt_product_table .button.alt:hover,
+.wpt_product_table button.button:hover {
+    background-color: #007399 !important;
+    color: #ffffff !important;
+}
+
+/* 6. Mobile responsiveness */
+@media screen and (max-width: 767px) {
+    .wpt_product_table td.wpt_action {
+        min-width: 100% !important;
+    }
+}
